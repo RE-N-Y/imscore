@@ -17,6 +17,7 @@ We provide a set of popular scorers such as PickScore, MPS, HPSv2, and LAION aes
 
 ```bash
 pip install imscore
+pip install transformers<5
 ```
 
 ## Usage
