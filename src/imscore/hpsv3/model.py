@@ -4,7 +4,7 @@ import torch.nn as nn
 import torchvision.transforms as T
 from torch import Tensor
 from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
-from .utils import process, INSTRUCTION
+from .utils import process, INSTRUCTION, resize_tensor
 
 
 class HPSv3(Qwen2VLForConditionalGeneration):
@@ -59,25 +59,28 @@ class HPSv3(Qwen2VLForConditionalGeneration):
     
     def prepare(self, images, prompts):
         messages = []
-        tform = T.ToPILImage()
-        images = [tform(im) for im in images]
+        # tform = T.ToPILImage()
+        # images = [tform(im) for im in images]
+        images = [im for im in images]
         for text, image in zip(prompts, images):
             m = [{ 
                 "role": "user",
                 "content": [ 
-                    { "type": "image", "image": image, "minpix": 256 * 28 * 28, "maxpix" : 256 * 28 * 28 },
+                    { "type": "image", "image": image },
                     { "type": "text",  "text": INSTRUCTION.format(prompt=text) }
                 ]
             }]
 
             messages.append(m)
 
-        images = process(messages)
+        # images = process(messages)
+        images = [resize_tensor(img, minpix=256*28*28, maxpix=256*28*28, factor=28) for img in images]
         batch = self.processor(
             text=self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True),
             images=images,
             padding=True,
             return_tensors="pt",
+            do_rescale=False
         )
         batch = { k : v.to(self.device) for k,v in batch.items() }
         return batch

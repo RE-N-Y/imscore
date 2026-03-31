@@ -2,6 +2,8 @@ import math
 from PIL import Image
 import torchvision.transforms.functional as TF
 from torchvision.transforms import InterpolationMode
+import torch
+import torch.nn.functional as F
 
 INSTRUCTION = """
 You are tasked with evaluating a generated image based on Visual Quality and Text Alignment and give a overall score to estimate the human preference. Please provide a rating from 0 to 10, with 0 being the worst and 10 being the best. 
@@ -51,6 +53,44 @@ def fetch(ele: dict, factor:int = 28) -> Image.Image:
     newh, neww = resize( h, w, factor=factor, minpix=ele["minpix"], maxpix=ele["maxpix"])
     image = TF.resize(image, (newh, neww), interpolation=InterpolationMode.BICUBIC)
     return image
+
+def resize_tensor(image: torch.Tensor, factor: int, minpix: int, maxpix: int) -> torch.Tensor:
+    """
+    image: Tensor [C, H, W] in [0,1] (float)
+    factor: int, round to multiple of this
+    minpix, maxpix: pixel constraints (H*W)
+    """
+    _, h, w = image.shape
+
+    # Convert to float to allow gradient flow
+    h = torch.tensor(h, dtype=torch.float32, device=image.device)
+    w = torch.tensor(w, dtype=torch.float32, device=image.device)
+
+    # Round to multiple of factor
+    hbar = torch.clamp((h / factor).round() * factor, min=factor)
+    wbar = torch.clamp((w / factor).round() * factor, min=factor)
+
+    # Compute area
+    area = hbar * wbar
+
+    # If too large -> scale down
+    if area > maxpix:
+        beta = torch.sqrt((h * w) / maxpix)
+        hbar = torch.floor((h / beta) / factor) * factor
+        wbar = torch.floor((w / beta) / factor) * factor
+    # If too small -> scale up
+    elif area < minpix:
+        beta = torch.sqrt(minpix / (h * w))
+        hbar = torch.ceil((h * beta) / factor) * factor
+        wbar = torch.ceil((w * beta) / factor) * factor
+
+    # Ensure integers
+    newh, neww = int(hbar.item()), int(wbar.item())
+
+    # Resize with differentiable interpolation
+    image = image.unsqueeze(0)  # [1, C, H, W]
+    image = F.interpolate(image, size=(newh, neww), mode="bicubic", align_corners=False)
+    return image.squeeze(0)  # [C, newh, neww]
 
 
 def process(conversations: list[dict] | list[list[dict]]) -> list:
